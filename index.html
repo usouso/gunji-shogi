@@ -1,0 +1,963 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>軍人将棋（23枚型）― 友達とネット対戦</title>
+<script src="https://cdn.jsdelivr.net/npm/peerjs@1.5.4/dist/peerjs.min.js"></script>
+<style>
+  :root{
+    --mine:#2563eb; --mine-dark:#1e40af; --enemy:#ea580c; --enemy-dark:#9a3412;
+    --bg:#0f172a; --panel:#1e293b; --panel2:#334155; --text:#f1f5f9; --sub:#94a3b8;
+    --cell:#475569; --cell-own:#3b4a63; --accent:#facc15;
+  }
+  *{box-sizing:border-box; -webkit-tap-highlight-color:transparent;}
+  body{margin:0; font-family:"Hiragino Kaku Gothic ProN","Hiragino Sans","Noto Sans JP",sans-serif;
+       background:var(--bg); color:var(--text); padding:10px; max-width:860px; margin:0 auto;}
+  h1{font-size:20px; margin:4px 0 2px; text-align:center;}
+  .subtitle{text-align:center; color:var(--sub); font-size:12px; margin-bottom:8px;}
+  .panel{background:var(--panel); border-radius:12px; padding:12px; margin-bottom:10px;}
+  .status{font-size:14px; line-height:1.6; min-height:24px;}
+  .status b{color:var(--accent);}
+  button{background:var(--mine); color:#fff; border:none; border-radius:10px; padding:12px 14px;
+         font-size:15px; font-weight:bold; cursor:pointer; width:100%; margin:4px 0;}
+  button.sub{background:var(--panel2);}
+  button.warn{background:#b45309;}
+  button:disabled{opacity:.45; cursor:default;}
+  input[type=text]{width:100%; padding:12px; font-size:18px; border-radius:10px; border:2px solid var(--panel2);
+                   background:#0b1220; color:var(--text); text-align:center; letter-spacing:.3em; text-transform:uppercase;}
+  .roomcode{font-size:34px; font-weight:bold; letter-spacing:.35em; text-align:center; color:var(--accent);
+            background:#0b1220; border-radius:10px; padding:10px 0 10px .35em; margin:6px 0;}
+  .rowflex{display:flex; gap:8px;} .rowflex>*{flex:1;}
+  /* ===== 盤 ===== */
+  #boardWrap{position:relative;}
+  #board{display:grid; grid-template-columns:repeat(6,1fr); gap:4px; max-width:520px; margin:0 auto;}
+  .cell{position:relative; aspect-ratio:1/1.08; background:var(--cell); border-radius:8px; border:2px solid transparent;
+        display:flex; align-items:center; justify-content:center; cursor:pointer; padding:0; width:100%;}
+  .cell.own-territory{background:var(--cell-own);}
+  .cell.hq{background:#5b4a2f; box-shadow:inset 0 0 0 2px #a16207;}
+  .cell.hq::after{content:"総司令部"; position:absolute; bottom:1px; left:0; right:0; text-align:center;
+                  font-size:8px; color:#fde68a; pointer-events:none;}
+  .cell.gate{border-color:#facc15; border-style:dashed;}
+  .cell.selected{outline:3px solid var(--accent); outline-offset:-1px;}
+  .cell.hint::before{content:""; position:absolute; width:34%; height:34%; border-radius:50%;
+                     background:rgba(250,204,21,.75); pointer-events:none; z-index:2;}
+  .cell.hint-capture::before{content:""; position:absolute; inset:2px; border-radius:8px;
+                     border:3px solid rgba(248,113,113,.95); pointer-events:none; z-index:2;}
+  .cell.battling{outline:3px solid #f87171; outline-offset:-1px;}
+  .piece{width:88%; height:82%; border-radius:6px; display:flex; align-items:center; justify-content:center;
+         font-weight:bold; font-size:clamp(11px,3.4vw,17px); color:#fff; line-height:1.1; text-align:center;
+         box-shadow:0 2px 4px rgba(0,0,0,.45); pointer-events:none; padding:1px;}
+  .piece.mine{background:linear-gradient(180deg,#3b82f6,var(--mine-dark));}
+  .piece.enemy{background:linear-gradient(180deg,#fb923c,var(--enemy-dark));}
+  .piece.facedown{background:repeating-linear-gradient(45deg,#7c2d12 0 6px,#9a3412 6px 12px); color:#fdba74;}
+  .piece.mine-facedown{background:repeating-linear-gradient(45deg,#1e3a8a 0 6px,#1e40af 6px 12px); color:#bfdbfe;}
+  .piece.small{font-size:clamp(9px,2.8vw,14px);}
+  /* ===== 情報パネル ===== */
+  .infoGrid{display:grid; grid-template-columns:1fr 1fr; gap:8px;}
+  .capbox{background:#0b1220; border-radius:10px; padding:8px; min-height:64px;}
+  .capbox h3{margin:0 0 4px; font-size:12px; color:var(--sub);}
+  .capbox .chips{font-size:13px; line-height:1.7; word-break:break-all;}
+  .chip{display:inline-block; border-radius:5px; padding:0 5px; margin:1px; background:var(--panel2); font-size:12px;}
+  .chip.mine{background:var(--mine-dark);} .chip.enemy{background:var(--enemy-dark);}
+  .turn{font-size:16px; font-weight:bold; text-align:center; padding:6px;}
+  .turn.mine{color:#93c5fd;} .turn.enemy{color:#fdba74;}
+  /* ===== オーバーレイ ===== */
+  .overlay{position:fixed; inset:0; background:rgba(2,6,23,.93); z-index:50; display:flex;
+           align-items:center; justify-content:center; padding:16px;}
+  .overlay .card{background:var(--panel); border-radius:14px; padding:22px; max-width:420px; width:100%; text-align:center;}
+  .overlay h2{margin-top:0;}
+  .hidden{display:none !important;}
+  #battleBanner{position:fixed; left:50%; top:14%; transform:translateX(-50%); z-index:60; width:min(92vw,420px);
+                background:#111827; border:2px solid #f87171; border-radius:14px; padding:14px; text-align:center;
+                box-shadow:0 10px 30px rgba(0,0,0,.6);}
+  #battleBanner .vs{display:flex; align-items:center; justify-content:center; gap:10px; margin:8px 0;}
+  #battleBanner .bp{flex:1; border-radius:8px; padding:12px 4px; font-size:20px; font-weight:bold; color:#fff;}
+  #battleResult{font-size:18px; font-weight:bold; color:var(--accent);}
+  details.rules{background:var(--panel); border-radius:12px; padding:10px 14px; margin-bottom:10px;}
+  details.rules summary{cursor:pointer; font-weight:bold; padding:4px 0;}
+  details.rules div{font-size:13px; line-height:1.8; color:#e2e8f0;}
+  details.rules table{border-collapse:collapse; margin:6px 0; font-size:12px;}
+  details.rules td, details.rules th{border:1px solid var(--panel2); padding:3px 6px; text-align:left;}
+  .note{font-size:12px; color:var(--sub); line-height:1.7;}
+  @media (max-width:560px){ .infoGrid{grid-template-columns:1fr 1fr;} h1{font-size:18px;} }
+</style>
+</head>
+<body>
+<h1>⚔️ 軍人将棋（23枚型）</h1>
+<div class="subtitle">友達とネット対戦 ／ 同じ画面で2人対戦</div>
+
+<!-- モード選択 -->
+<div class="panel" id="modePanel">
+  <div class="status">遊び方を選んでください。</div>
+  <button id="btnNetMode">🌐 ネット対戦（部屋コードで友達と）</button>
+  <button id="btnLocalMode" class="sub">👥 同じ画面で2人対戦</button>
+  <div id="netMenu" class="hidden">
+    <hr style="border-color:var(--panel2)">
+    <button id="btnHost">🏠 部屋を作る（あなたが先手・青）</button>
+    <div id="hostInfo" class="hidden">
+      <div class="note">この部屋コードを友達に教えてください。友達がこのページを開いて、コードを入れたらつながります。</div>
+      <div class="roomcode" id="roomCodeView">------</div>
+      <div class="status" id="hostWait">友達の接続を待っています…</div>
+    </div>
+    <div class="note" style="margin-top:8px;">部屋に入る場合はこちら。友達から聞いた6文字のコードを入れてください。</div>
+    <input type="text" id="joinCode" maxlength="6" placeholder="部屋コード">
+    <button id="btnJoin" class="sub">🚪 部屋に入る（あなたは後手・橙）</button>
+    <div class="status" id="netStatus"></div>
+  </div>
+</div>
+
+<!-- ゲームパネル -->
+<div id="gamePanel" class="hidden">
+  <div class="panel">
+    <div class="turn" id="turnView">配置の時間です</div>
+    <div class="status" id="statusView">自分の駒を並べてください。</div>
+    <div class="rowflex">
+      <button id="btnShuffle" class="sub">🎲 ランダムに並べ直す</button>
+      <button id="btnReady">✅ 配置OK・準備完了</button>
+    </div>
+    <div class="rowflex">
+      <button id="btnReconnect" class="sub hidden">🔄 再接続する</button>
+      <button id="btnRematch" class="warn hidden">🔁 再戦する</button>
+    </div>
+  </div>
+
+  <div id="boardWrap"><div id="board"></div></div>
+
+  <div class="panel" style="margin-top:10px;">
+    <div class="infoGrid">
+      <div class="capbox"><h3>あなたが取った駒</h3><div class="chips" id="capByMe">なし</div></div>
+      <div class="capbox"><h3>あなたが取られた駒</h3><div class="chips" id="capFromMe">なし</div></div>
+    </div>
+    <div class="note" id="oppCapNote">相手の残り駒は、戦闘するまで中身が分かりません。</div>
+  </div>
+</div>
+
+<!-- 手渡し画面（ローカル対戦） -->
+<div class="overlay hidden" id="handoffOverlay">
+  <div class="card">
+    <h2 id="handoffTitle">相手に渡してください</h2>
+    <p id="handoffText">画面を見られないようにして、相手に渡してください。</p>
+    <button id="btnHandoffOk">私は次のプレイヤーです・表示する</button>
+  </div>
+</div>
+
+<!-- 戦闘表示 -->
+<div id="battleBanner" class="hidden">
+  <div style="font-weight:bold;">⚔️ 戦闘！</div>
+  <div class="vs">
+    <div class="bp" id="battleAtk" style="background:var(--mine-dark);">？</div>
+    <div>VS</div>
+    <div class="bp" id="battleDef" style="background:var(--enemy-dark);">？</div>
+  </div>
+  <div id="battleResult">判定中…</div>
+</div>
+
+<!-- 終了画面 -->
+<div class="overlay hidden" id="overOverlay">
+  <div class="card">
+    <h2 id="overTitle">結果</h2>
+    <p id="overText"></p>
+    <button id="btnOverRematch">🔁 再戦する</button>
+    <button id="btnOverClose" class="sub">盤面を見る</button>
+  </div>
+</div>
+
+<details class="rules">
+  <summary>📖 ルール（かんたん版）を開く</summary>
+  <div>
+    <p><b>目的：</b>将校（大将〜少尉のどれか）で相手の「総司令部」（相手陣地の最後列・中央2マス）に入るか、相手の動ける駒を全部なくすと勝ちです。</p>
+    <p><b>盤と配置：</b>6列×8行。自分の陣地（手前4行）に23枚を並べます（1マス空きます）。黄色い点線のマスが「突入口」で、陣地の境目は、飛行機以外は列1と列4のところからしか越えられません。地雷と軍旗は、自陣の一番前の列の突入口には置けません。軍旗は一番後ろの列にも置けません。</p>
+    <p><b>駒の動き（前後左右のみ）：</b></p>
+    <table>
+      <tr><th>駒</th><th>動き</th></tr>
+      <tr><td>将校・スパイ</td><td>1マス</td></tr>
+      <tr><td>タンク・騎兵</td><td>1〜2マス（途中に駒があると越えられない）</td></tr>
+      <tr><td>工兵</td><td>まっすぐ何マスでも（駒は越えられない）</td></tr>
+      <tr><td>飛行機</td><td>前後は駒を飛び越えて何マスでも／横は1マス。突入口を無視できる</td></tr>
+      <tr><td>地雷・軍旗</td><td>動かせない</td></tr>
+    </table>
+    <p><b>戦闘：</b>相手の駒のマスに動くと戦闘です。将校同士は階級が高い方が勝ち、同種は引き分け（両方消えます）。スパイは大将にだけ勝ちます。飛行機は将官（大将・中将・少将）に負け、それ以外に勝ちます。タンクは将官・飛行機・工兵に負け、大佐以下に勝ちます。騎兵は工兵とスパイにだけ勝ちます。工兵はタンク・スパイ・地雷に勝ちます。地雷は飛行機と工兵にだけ負け、それ以外は引き分け（爆発して両方消えます）。軍旗の強さは「真後ろの自分の駒」と同じになります。後ろに駒が無いと一番弱くなります。</p>
+    <p><b>戦闘のとき：</b>両方の駒が約1.5秒見えるようになります。勝った駒はまた伏せられます。</p>
+    <p><b>ネット対戦：</b>部屋を作った人が先手（青・下側）です。両方が「配置OK」を押すと始まります。相手の駒の中身は、戦闘するまで相手には送られません。</p>
+  </div>
+</details>
+
+<script>
+'use strict';
+/* ================================================================
+   純粋ロジック（DOMに触れない部分。Nodeで抜き出してテスト可能）
+   盤の表現: board[r][c] = null | { owner:0|1, type:'大将' など }
+   行0 = 上側プレイヤー(1)の最後列、行7 = 下側プレイヤー(0)の最後列
+   プレイヤー0: 自陣 行4..7 / プレイヤー1: 自陣 行0..3
+   ================================================================ */
+//__PURE_START__
+const ROWS = 8, COLS = 6;
+const GATE_COLS = [1, 4];
+const OFFICER_RANK = { '大将':9, '中将':8, '少将':7, '大佐':6, '中佐':5, '少佐':4, '大尉':3, '中尉':2, '少尉':1 };
+const PIECE_SET = [
+  ['大将',1],['中将',1],['少将',1],['大佐',1],['中佐',1],['少佐',1],
+  ['大尉',2],['中尉',2],['少尉',2],['飛行機',2],['タンク',2],['騎兵',1],
+  ['工兵',2],['スパイ',1],['地雷',2],['軍旗',1]
+];
+function isOfficer(t){ return Object.prototype.hasOwnProperty.call(OFFICER_RANK, t); }
+function homeRows(owner){ return owner === 0 ? [4,5,6,7] : [0,1,2,3]; }
+function frontRow(owner){ return owner === 0 ? 4 : 3; }   // 境界に接する自陣の行
+function lastRow(owner){ return owner === 0 ? 7 : 0; }    // 自分の最後列
+function hqSquares(owner){ return [[lastRow(owner), 2], [lastRow(owner), 3]]; } // そのownerの総司令部
+function isHQOf(r, c, owner){ return r === lastRow(owner) && (c === 2 || c === 3); }
+function crossesBoundary(r1, r2){ return (r1 < 4 && r2 >= 4) || (r1 >= 4 && r2 < 4); }
+
+// 配置可否: 地雷・軍旗は自陣最前列の突入口マス不可、軍旗は自陣最後列不可
+function canPlace(type, owner, r, c){
+  if (!homeRows(owner).includes(r) || c < 0 || c >= COLS) return false;
+  if ((type === '地雷' || type === '軍旗') && r === frontRow(owner) && GATE_COLS.includes(c)) return false;
+  if (type === '軍旗' && r === lastRow(owner)) return false;
+  return true;
+}
+
+// 戦闘判定: 戻り値 'atk'（攻撃側の勝ち） | 'def'（守備側の勝ち） | 'draw'（両方除去）
+// defBehind: 守備側が軍旗のとき、その真後ろ（持ち主の最後列方向の隣）にある味方駒の種類。無ければ null。
+function battle(atk, def, defBehind){
+  let d = def;
+  if (def === '軍旗'){
+    if (!defBehind) return 'atk';            // 後ろに駒が無ければ最弱
+    d = defBehind;
+    if (d === '軍旗') return 'atk';           // 軍旗は1枚だけなので通常起こらない
+  }
+  if (d === '地雷'){
+    // 地雷は守備専用。飛行機と工兵にだけ負け、それ以外は引き分け（爆発・両方除去）
+    return (atk === '飛行機' || atk === '工兵') ? 'atk' : 'draw';
+  }
+  if (atk === d) return 'draw';               // 同種は引き分け
+  if (atk === 'スパイ') return d === '大将' ? 'atk' : 'def';  // スパイは大将にだけ勝つ
+  if (d === 'スパイ') return atk === '大将' ? 'def' : 'atk';  // 守備側スパイは大将にだけ勝つ
+  const aOff = isOfficer(atk), dOff = isOfficer(d);
+  if (aOff && dOff) return OFFICER_RANK[atk] > OFFICER_RANK[d] ? 'atk' : 'def';
+  // 特殊駒が「勝てる相手」の一覧（地雷・スパイ・同種は上で処理済み）
+  const BEATS = {
+    '飛行機': ['大佐','中佐','少佐','大尉','中尉','少尉','タンク','騎兵','工兵'],
+    'タンク': ['大佐','中佐','少佐','大尉','中尉','少尉','騎兵'],
+    '騎兵':   ['工兵'],
+    '工兵':   ['タンク']
+  };
+  if (!aOff && dOff){
+    // 特殊駒 vs 将校: BEATSに含まれなければ将校側の勝ち
+    return BEATS[atk] && BEATS[atk].includes(d) ? 'atk' : 'def';
+  }
+  if (aOff && !dOff){
+    // 将校 vs 特殊駒（守備側）: 飛行機・タンクには将官だけが勝ち、騎兵・工兵には全将校が勝つ
+    if (d === '飛行機' || d === 'タンク') return OFFICER_RANK[atk] >= 7 ? 'atk' : 'def';
+    return 'atk'; // 騎兵・工兵
+  }
+  // 特殊駒同士
+  return BEATS[atk] && BEATS[atk].includes(d) ? 'atk' : 'def';
+}
+
+// 軍旗の「真後ろ」の駒（守備側ownerの最後列方向に隣接するマス）。味方駒でなければ null 扱い。
+function flagBehindType(board, r, c, defOwner){
+  const br = defOwner === 0 ? r + 1 : r - 1;
+  if (br < 0 || br >= ROWS) return null;
+  const p = board[br][c];
+  return (p && p.owner === defOwner) ? p.type : null;
+}
+
+// そのマスから1歩進むときに境界を越えるか＆越えられるか（飛行機は無視できる）
+function stepAllowed(pieceType, r1, c1, r2){
+  if (!crossesBoundary(r1, r2)) return true;
+  if (pieceType === '飛行機') return true;
+  return GATE_COLS.includes(c1);
+}
+
+// 駒の合法手一覧 [[r,c],...]（自駒のマスは除く。敵駒のマスは戦闘として含む）
+function pieceMoves(board, r, c){
+  const p = board[r][c];
+  if (!p) return [];
+  const t = p.type, owner = p.owner;
+  if (t === '地雷' || t === '軍旗') return [];
+  const out = [];
+  const dirs = [[-1,0],[1,0],[0,-1],[0,1]];
+  const tryAdd = (nr, nc) => {
+    if (nr < 0 || nr >= ROWS || nc < 0 || nc >= COLS) return false;
+    const q = board[nr][nc];
+    if (q && q.owner === owner) return false;
+    out.push([nr, nc]); return true;
+  };
+  if (isOfficer(t) || t === 'スパイ'){
+    for (const [dr, dc] of dirs){
+      if (!stepAllowed(t, r, c, r + dr)) continue;
+      tryAdd(r + dr, c + dc);
+    }
+  } else if (t === 'タンク' || t === '騎兵'){
+    for (const [dr, dc] of dirs){
+      // 1マス目
+      if (!stepAllowed(t, r, c, r + dr)) continue;
+      const r1 = r + dr, c1 = c + dc;
+      if (r1 < 0 || r1 >= ROWS || c1 < 0 || c1 >= COLS) continue;
+      const mid = board[r1][c1];
+      if (mid){ if (mid.owner !== owner) out.push([r1, c1]); continue; } // 途中が埋まっていれば2マス目は不可
+      out.push([r1, c1]);
+      // 2マス目（途中が空きのときだけ）
+      if (!stepAllowed(t, r1, c1, r1 + dr)) continue;
+      tryAdd(r1 + dr, c1 + dc);
+    }
+  } else if (t === '工兵'){
+    for (const [dr, dc] of dirs){
+      let nr = r, nc = c;
+      while (true){
+        if (!stepAllowed(t, nr, nc, nr + dr)) break;
+        nr += dr; nc += dc;
+        if (nr < 0 || nr >= ROWS || nc < 0 || nc >= COLS) break;
+        const q = board[nr][nc];
+        if (q){ if (q.owner !== owner) out.push([nr, nc]); break; }
+        out.push([nr, nc]);
+      }
+    }
+  } else if (t === '飛行機'){
+    // 縦（前後）: 駒を飛び越えて何マスでも
+    for (const dr of [-1, 1]){
+      let nr = r;
+      while (true){
+        nr += dr;
+        if (nr < 0 || nr >= ROWS) break;
+        const q = board[nr][c];
+        if (q && q.owner === owner) continue;   // 味方は飛び越えるが、そのマスには止まれない
+        out.push([nr, c]);                        // 空き or 敵（敵でもさらに奥へ進める）
+      }
+    }
+    // 横: 1マスのみ
+    for (const dc of [-1, 1]) tryAdd(r, c + dc);
+  }
+  return out;
+}
+function hasMovable(board, owner){
+  for (let r = 0; r < ROWS; r++) for (let c = 0; c < COLS; c++){
+    const p = board[r][c];
+    if (p && p.owner === owner && pieceMoves(board, r, c).length > 0) return true;
+  }
+  return false;
+}
+// ランダム配置（配置制限を満たすまで引き直し）。戻り値: owner陣地の {r,c,type} 一覧
+function randomPlacement(owner){
+  const types = [];
+  for (const [t, n] of PIECE_SET) for (let i = 0; i < n; i++) types.push(t);
+  const squares = [];
+  for (const r of homeRows(owner)) for (let c = 0; c < COLS; c++) squares.push([r, c]);
+  for (let attempt = 0; attempt < 500; attempt++){
+    const ts = types.slice(), sq = squares.slice();
+    // Fisher-Yates
+    for (let i = ts.length - 1; i > 0; i--){ const j = Math.floor(Math.random() * (i + 1)); [ts[i], ts[j]] = [ts[j], ts[i]]; }
+    for (let i = sq.length - 1; i > 0; i--){ const j = Math.floor(Math.random() * (i + 1)); [sq[i], sq[j]] = [sq[j], sq[i]]; }
+    let ok = true;
+    const placed = [];
+    for (let i = 0; i < ts.length; i++){
+      const [r, c] = sq[i];
+      if (!canPlace(ts[i], owner, r, c)){ ok = false; break; }
+      placed.push({ r, c, type: ts[i] });
+    }
+    if (ok) return placed;
+  }
+  // フォールバック（通常到達しない）: 制限のある駒から先に置く
+  const placed = [], used = new Set();
+  const order = types.slice().sort((a, b) => ((b === '軍旗' || b === '地雷') ? 1 : 0) - ((a === '軍旗' || a === '地雷') ? 1 : 0));
+  for (const t of order){
+    const cand = squares.filter(([r, c]) => !used.has(r + ',' + c) && canPlace(t, owner, r, c));
+    const [r, c] = cand[Math.floor(Math.random() * cand.length)];
+    used.add(r + ',' + c); placed.push({ r, c, type: t });
+  }
+  return placed;
+}
+//__PURE_END__
+</script>
+<script>
+'use strict';
+/* ================================================================
+   ゲーム本体（画面・進行・通信）
+   ================================================================ */
+const $ = id => document.getElementById(id);
+const emptyBoard = () => Array.from({length: ROWS}, () => Array(COLS).fill(null));
+
+let mode = null;           // 'net' | 'local'
+let phase = 'mode';        // 'place' | 'play' | 'over'
+let board = emptyBoard();
+let myIndex = 0;           // net: 0=ホスト(下・先手) / 1=ゲスト(上・後手)。localでは表示用に現在のプレイヤー
+let turn = 0;              // 現在の手番プレイヤー（正規座標のowner）
+let viewAs = 0;            // 画面の下側に表示するプレイヤー
+let selected = null;       // [r,c] 正規座標
+let legalCache = [];
+let capturedBy = {0: [], 1: []};   // 各プレイヤーが「取った」駒の種類
+let moveNumber = 0;        // 手数 n
+let inputLocked = false;
+let localPlacer = 0;       // local: いま配置しているプレイヤー
+let localPlaced = {0: false, 1: false};
+let gameStarted = false;
+
+/* ---------- ネット対戦（PeerJS） ---------- */
+let peer = null, conn = null, roomCode = '', netRole = null; // 'host' | 'guest'
+let myReady = false, oppReady = false;
+const processed = new Set();  // 適用済みキー (n:move / n:battle / n:over)
+let pendingRemoteBattle = null; // 守備側: reveal待ち {n, from, to}
+let pendingMyBattle = null;     // 攻撃側: battle待ち {n, from, to}
+
+function setStatus(html){ $('statusView').innerHTML = html; }
+function setNetStatus(html){ $('netStatus').innerHTML = html; }
+function codeGen(){
+  const chars = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
+  let s = ''; for (let i = 0; i < 6; i++) s += chars[Math.floor(Math.random() * chars.length)];
+  return s;
+}
+function peerIdFor(code){ return 'gs23jp-' + code; }
+
+function initPeerCommon(){
+  peer.on('error', (e) => {
+    if (e.type === 'peer-unavailable'){ setNetStatus('その部屋コードが見つかりませんでした。コードを確認してください。'); }
+    else if (e.type === 'unavailable-id'){ setNetStatus('そのコードは使用中でした。もう一度「部屋を作る」を押してください。'); }
+    else { setNetStatus('接続で問題が起きました（' + e.type + '）。再接続ボタンをお試しください。'); showReconnect(); }
+  });
+  peer.on('disconnected', () => { try { peer.reconnect(); } catch(_){} });
+}
+function hostRoom(){
+  roomCode = codeGen();
+  netRole = 'host'; myIndex = 0;
+  $('roomCodeView').textContent = roomCode;
+  $('hostInfo').classList.remove('hidden');
+  $('hostWait').textContent = '友達の接続を待っています…';
+  if (typeof Peer === 'undefined'){ setNetStatus('通信用の部品（PeerJS）を読み込めませんでした。ネットにつながっているか確認してください。'); return; }
+  try { peer = new Peer(peerIdFor(roomCode)); } catch(e){ setNetStatus('接続の準備に失敗しました。'); return; }
+  initPeerCommon();
+  peer.on('connection', (c) => {
+    if (conn){ try { c.close(); } catch(_){} return; }
+    conn = c; setupConn();
+  });
+}
+function joinRoom(){
+  const code = ($('joinCode').value || '').trim().toUpperCase();
+  if (code.length !== 6){ setNetStatus('6文字の部屋コードを入れてください。'); return; }
+  roomCode = code; netRole = 'guest'; myIndex = 1;
+  if (typeof Peer === 'undefined'){ setNetStatus('通信用の部品（PeerJS）を読み込めませんでした。ネットにつながっているか確認してください。'); return; }
+  try { peer = new Peer(); } catch(e){ setNetStatus('接続の準備に失敗しました。'); return; }
+  initPeerCommon();
+  peer.on('open', () => {
+    conn = peer.connect(peerIdFor(roomCode), { reliable: true });
+    setupConn();
+  });
+  setNetStatus('部屋「' + roomCode + '」に接続しています…');
+}
+function setupConn(){
+  conn.on('open', () => {
+    setNetStatus('');
+    if (netRole === 'host') $('hostWait').textContent = 'つながりました！';
+    startPlacement();
+  });
+  conn.on('data', onNetData);
+  conn.on('close', () => { onDisconnected(); });
+  conn.on('error', () => { onDisconnected(); });
+}
+function onDisconnected(){
+  if (phase === 'over') return;
+  setStatus('⚠️ 相手との接続が切れました。再接続ボタンを押すか、ページを開き直してもう一度同じコードでつないでください。');
+  showReconnect();
+}
+function showReconnect(){ if (mode === 'net') $('btnReconnect').classList.remove('hidden'); }
+function send(obj){ if (conn && conn.open){ try { conn.send(obj); } catch(_){ } } }
+
+/* ---------- 進行管理 ---------- */
+function startPlacement(){
+  $('modePanel').classList.add('hidden');
+  $('gamePanel').classList.remove('hidden');
+  phase = 'place'; gameStarted = false;
+  board = emptyBoard(); capturedBy = {0: [], 1: []};
+  moveNumber = 0; processed.clear();
+  myReady = false; oppReady = false; selected = null; inputLocked = false;
+  pendingRemoteBattle = null; pendingMyBattle = null;
+  $('btnRematch').classList.add('hidden');
+  if (mode === 'net'){
+    viewAs = myIndex;
+    placeRandom(myIndex);
+    $('turnView').textContent = '配置の時間です（あなた）';
+    $('turnView').className = 'turn mine';
+    setStatus('自分の駒を並べてください。駒を2つタップすると入れ替え、空きマスをタップすると移動できます。良ければ「配置OK・準備完了」を押してください。');
+    $('btnShuffle').disabled = false; $('btnReady').disabled = false;
+  } else {
+    localPlacer = 0; localPlaced = {0: false, 1: false};
+    beginLocalPlacement(0);
+  }
+  render();
+}
+function beginLocalPlacement(p){
+  viewAs = p; turn = p;
+  board = removePiecesOf(board, p); // そのプレイヤーの駒だけ置き直す
+  placeRandom(p);
+  $('turnView').textContent = (p === 0 ? '青さん' : '橙さん') + 'の配置の時間です';
+  $('turnView').className = 'turn ' + (p === 0 ? 'mine' : 'enemy');
+  setStatus('自分の駒を並べてください。駒を2つタップすると入れ替え、空きマスをタップすると移動できます。良ければ「配置OK」を押してください。');
+  $('btnShuffle').disabled = false; $('btnReady').disabled = false;
+  render();
+}
+function removePiecesOf(bd, owner){
+  const nb = emptyBoard();
+  for (let r = 0; r < ROWS; r++) for (let c = 0; c < COLS; c++){
+    const p = bd[r][c];
+    if (p && p.owner !== owner) nb[r][c] = p;
+  }
+  return nb;
+}
+function placeRandom(owner){
+  // 既存の自分の駒を取り除いてから置き直す
+  for (let r = 0; r < ROWS; r++) for (let c = 0; c < COLS; c++)
+    if (board[r][c] && board[r][c].owner === owner) board[r][c] = null;
+  for (const pl of randomPlacement(owner)) board[pl.r][pl.c] = { owner, type: pl.type };
+}
+function placementValid(owner){
+  let count = 0;
+  for (let r = 0; r < ROWS; r++) for (let c = 0; c < COLS; c++){
+    const p = board[r][c];
+    if (p && p.owner === owner){ count++; if (!canPlace(p.type, owner, r, c)) return { ok: false, msg: p.type + 'の置き場所がルール違反です。' }; }
+  }
+  return count === 23 ? { ok: true } : { ok: false, msg: '駒が23枚そろっていません。' };
+}
+
+function onReady(){
+  const me = mode === 'net' ? myIndex : localPlacer;
+  const v = placementValid(me);
+  if (!v.ok){ setStatus('⚠️ ' + v.msg); return; }
+  $('btnShuffle').disabled = true; $('btnReady').disabled = true; selected = null;
+  if (mode === 'net'){
+    myReady = true;
+    // 駒の「位置」だけを相手に知らせる（実物でも駒の有無は見えるため。中身は送らない）
+    const squares = [];
+    for (let r = 0; r < ROWS; r++) for (let c = 0; c < COLS; c++)
+      if (board[r][c] && board[r][c].owner === myIndex) squares.push([r, c]);
+    send({ type: 'setup', squares });
+    send({ type: 'ready' });
+    if (oppReady) startGame();
+    else setStatus('準備OKです。相手の配置が終わるのを待っています…');
+  } else {
+    localPlaced[me] = true;
+    if (!localPlaced[1 - me]){
+      showHandoff('配置が終わりました', (me === 0 ? '青さん' : '橙さん') + 'の配置が終わりました。画面を見られないようにして、相手に渡してください。', () => beginLocalPlacement(1 - me));
+    } else {
+      showHandoff('両方の配置が終わりました', '先手の青さんに渡してください。', () => {
+        phase = 'play'; turn = 0; viewAs = 0; gameStarted = true;
+        setStatus('対戦開始！青さんの番です。');
+        startTurnChecks();
+        render();
+      });
+    }
+  }
+  render();
+}
+function startGame(){
+  phase = 'play'; turn = 0; gameStarted = true;
+  selected = null;
+  setStatus(turn === myIndex ? '対戦開始！あなたの番です。' : '対戦開始！相手の番です。');
+  render();
+}
+
+/* ローカル用：手番前の隠し画面 */
+function showHandoff(title, text, cb){
+  $('handoffTitle').textContent = title;
+  $('handoffText').textContent = text;
+  $('handoffOverlay').classList.remove('hidden');
+  $('btnHandoffOk').onclick = () => { $('handoffOverlay').classList.add('hidden'); cb(); };
+}
+
+/* ---------- 盤の描画（viewAs が下側になるよう変換） ---------- */
+function toDisp(r, c){ return viewAs === 0 ? [r, c] : [ROWS - 1 - r, COLS - 1 - c]; }
+function fromDisp(dr, dc){ return viewAs === 0 ? [dr, dc] : [ROWS - 1 - dr, COLS - 1 - dc]; }
+
+function render(battleCells){
+  const bd = $('board'); bd.innerHTML = '';
+  const viewer = mode === 'net' ? myIndex : viewAs;
+  for (let dr = 0; dr < ROWS; dr++){
+    for (let dc = 0; dc < COLS; dc++){
+      const [r, c] = fromDisp(dr, dc);
+      const cell = document.createElement('button');
+      cell.className = 'cell';
+      cell.dataset.r = r; cell.dataset.c = c;
+      if (homeRows(viewer).includes(r)) cell.classList.add('own-territory');
+      if (isHQOf(r, c, 0) || isHQOf(r, c, 1)) cell.classList.add('hq');
+      // 突入口の表示（境界に接する行の列1・4）
+      if ((r === 3 || r === 4) && GATE_COLS.includes(c)) cell.classList.add('gate');
+      if (selected && selected[0] === r && selected[1] === c) cell.classList.add('selected');
+      if (legalCache.some(([lr, lc]) => lr === r && lc === c)){
+        cell.classList.add(board[r][c] ? 'hint-capture' : 'hint');
+      }
+      if (battleCells && battleCells.some(([br, bc]) => br === r && bc === c)) cell.classList.add('battling');
+      const p = board[r][c];
+      if (p){
+        const el = document.createElement('div');
+        const minePiece = p.owner === viewer;
+        el.className = 'piece ' + (minePiece ? 'mine' : 'enemy') + (p.type.length >= 3 ? ' small' : '');
+        if (minePiece){
+          el.textContent = p.type;
+        } else if (phase === 'place' && mode === 'local'){
+          // ローカル配置中：相手の駒は存在だけ伏せて表示
+          el.textContent = '敵'; el.classList.add('facedown'); el.classList.add('enemy');
+        } else if (p.type){
+          el.textContent = '敵'; el.classList.add('facedown');
+        } else {
+          el.textContent = '敵'; el.classList.add('facedown');
+        }
+        cell.appendChild(el);
+      }
+      cell.addEventListener('click', () => onCellClick(r, c));
+      bd.appendChild(cell);
+    }
+  }
+  renderCaptured(viewer);
+  renderTurn(viewer);
+}
+function renderTurn(viewer){
+  const tv = $('turnView');
+  if (phase === 'place'){
+    if (mode === 'net'){ tv.textContent = '配置の時間です（あなた）'; tv.className = 'turn mine'; }
+    return;
+  }
+  if (phase === 'over') return;
+  const myTurn = mode === 'net' ? (turn === myIndex) : (turn === viewAs);
+  if (mode === 'net'){
+    tv.textContent = myTurn ? 'あなたの番です' : '相手の番です';
+    tv.className = 'turn ' + (myTurn ? 'mine' : 'enemy');
+  } else {
+    tv.textContent = (turn === 0 ? '青さん' : '橙さん') + 'の番です';
+    tv.className = 'turn ' + (turn === 0 ? 'mine' : 'enemy');
+  }
+}
+function renderCaptured(viewer){
+  const other = 1 - viewer;
+  const fmt = (arr, cls) => arr.length ? arr.map(t => '<span class="chip ' + cls + '">' + t + '</span>').join('') : 'なし';
+  $('capByMe').innerHTML = fmt(capturedBy[viewer], 'mine');
+  $('capFromMe').innerHTML = fmt(capturedBy[other], 'enemy');
+}
+
+/* ---------- セル操作 ---------- */
+function onCellClick(r, c){
+  if (inputLocked || phase === 'over') return;
+  if (phase === 'place'){
+    const me = mode === 'net' ? myIndex : localPlacer;
+    if (myReady && mode === 'net') return;
+    const p = board[r][c];
+    if (!selected){
+      if (p && p.owner === me) selected = [r, c];
+      render(); return;
+    }
+    const [sr, sc] = selected;
+    if (sr === r && sc === c){ selected = null; render(); return; }
+    const src = board[sr][sc];
+    // 自陣内のみ。行き先は自分の駒 or 自陣の空きマス
+    if (!homeRows(me).includes(r)){ setStatus('配置は自分の陣地の中だけです。'); selected = null; render(); return; }
+    const dst = board[r][c];
+    if (dst && dst.owner !== me){ selected = null; render(); return; }
+    const dstType = dst ? dst.type : null;
+    if (!canPlace(src.type, me, r, c)){ setStatus('⚠️ ' + src.type + 'は、そこには置けません（地雷・軍旗は一番前の突入口、軍旗は一番後ろの列には置けません）。'); render(); return; }
+    if (dstType && !canPlace(dstType, me, sr, sc)){ setStatus('⚠️ 入れ替えると ' + dstType + ' の置き場所がルール違反になります。'); render(); return; }
+    board[r][c] = src; board[sr][sc] = dst;
+    selected = null;
+    setStatus('配置を変えました。良ければ「配置OK・準備完了」を押してください。');
+    render(); return;
+  }
+  if (phase !== 'play') return;
+  // 対戦中：自分の番だけ操作できる
+  if (mode === 'net' && turn !== myIndex) return;
+  if (mode === 'local' && turn !== viewAs) return;
+  const me = turn;
+  const p = board[r][c];
+  if (!selected){
+    if (p && p.owner === me){
+      selected = [r, c];
+      legalCache = pieceMoves(board, r, c);
+      if (legalCache.length === 0) setStatus(p.type + 'は動けません。別の駒を選んでください。');
+      render();
+    }
+    return;
+  }
+  const [sr, sc] = selected;
+  if (sr === r && sc === c){ selected = null; legalCache = []; render(); return; }
+  if (legalCache.some(([lr, lc]) => lr === r && lc === c)){
+    selected = null; legalCache = [];
+    doMove(me, [sr, sc], [r, c]);
+    return;
+  }
+  if (p && p.owner === me){
+    selected = [r, c]; legalCache = pieceMoves(board, r, c); render();
+  }
+}
+
+/* ---------- 移動と戦闘の適用 ---------- */
+function doMove(mover, from, to){
+  moveNumber++;
+  const n = moveNumber;
+  const target = board[to[0]][to[1]];
+  if (mode === 'net'){
+    send({ type: 'move', n, from, to });
+    if (target){
+      // 戦闘：守備側の返事（battle）を待つ
+      pendingMyBattle = { n, from, to };
+      inputLocked = true;
+      setStatus('戦闘が起きました。相手の判定を待っています…');
+      render([[from[0], from[1]], [to[0], to[1]]]);
+    } else {
+      applyPlainMove(mover, from, to);
+      afterMoveDone(mover, to, false);
+    }
+  } else {
+    if (target){
+      resolveBattleLocal(mover, from, to);
+    } else {
+      applyPlainMove(mover, from, to);
+      afterMoveDone(mover, to, false);
+    }
+  }
+}
+function applyPlainMove(mover, from, to){
+  board[to[0]][to[1]] = board[from[0]][from[1]];
+  board[from[0]][from[1]] = null;
+}
+function applyBattleResult(atkOwner, from, to, atkType, defType, outcome){
+  const defOwner = 1 - atkOwner;
+  if (outcome === 'atk'){
+    capturedBy[atkOwner].push(defType);
+    board[to[0]][to[1]] = { owner: atkOwner, type: atkType };
+    board[from[0]][from[1]] = null;
+  } else if (outcome === 'def'){
+    capturedBy[defOwner].push(atkType);
+    board[from[0]][from[1]] = null; // 守備側はそのまま残る（種類は既に知っている場合のみ保持）
+    if (!board[to[0]][to[1]]) board[to[0]][to[1]] = { owner: defOwner, type: defType };
+    else if (!board[to[0]][to[1]].type) board[to[0]][to[1]].type = defType;
+  } else { // draw
+    capturedBy[atkOwner].push(defType);
+    capturedBy[defOwner].push(atkType);
+    board[to[0]][to[1]] = null;
+    board[from[0]][from[1]] = null;
+  }
+}
+function checkHQWin(atkOwner, to, atkType, outcome){
+  if (outcome !== 'atk') return false;
+  if (!isOfficer(atkType)) return false;
+  return isHQOf(to[0], to[1], 1 - atkOwner);
+}
+function afterMoveDone(mover, to, wasBattle){
+  // HQ占領チェック（通常移動でHQに入った場合。戦闘時は呼び出し側で処理）
+  const piece = board[to[0]][to[1]];
+  if (!wasBattle && piece && piece.owner === mover && isOfficer(piece.type) && isHQOf(to[0], to[1], 1 - mover)){
+    // ネット対戦では、動かした側だけが駒の種類を知っているので、勝ちを相手にも知らせる
+    if (mode === 'net' && mover === myIndex) send({ type: 'gameover', winner: mover, reason: 'hq' });
+    gameOver(mover, 'hq'); return;
+  }
+  turn = 1 - turn;
+  selected = null; legalCache = []; inputLocked = false;
+  if (mode === 'local'){
+    // 手渡しを挟んでから次のプレイヤーの番
+    const next = turn;
+    showHandoff('手番が終わりました', '画面を見られないようにして、' + (next === 0 ? '青さん' : '橙さん') + 'に渡してください。', () => {
+      viewAs = next;
+      setStatus((next === 0 ? '青さん' : '橙さん') + 'の番です。');
+      startTurnChecks();
+      render();
+    });
+  } else {
+    setStatus(turn === myIndex ? 'あなたの番です。' : '相手の番です。');
+    startTurnChecks();
+  }
+  render();
+}
+function startTurnChecks(){
+  if (phase !== 'play') return;
+  // 自分の番の開始時に動ける駒が無ければ負け（判定はそのプレイヤー側で行う）
+  const mineTurnHere = (mode === 'net') ? (turn === myIndex) : (turn === viewAs);
+  if (mineTurnHere && !hasMovable(board, turn)){
+    if (mode === 'net') send({ type: 'gameover', winner: 1 - turn, reason: 'nomove' });
+    gameOver(1 - turn, 'nomove');
+  }
+}
+function gameOver(winner, reason){
+  if (phase === 'over') return;
+  phase = 'over';
+  const viewer = mode === 'net' ? myIndex : viewAs;
+  const iWon = winner === viewer;
+  let title, text;
+  if (mode === 'net'){
+    title = iWon ? '🎉 あなたの勝ち！' : '相手の勝ち';
+  } else {
+    title = (winner === 0 ? '🎉 青さん' : '🎉 橙さん') + 'の勝ち！';
+  }
+  text = reason === 'hq' ? '将校が相手の総司令部に入りました。' : '動かせる駒が無くなりました。';
+  if (mode === 'net') text += iWon ? '' : '';
+  $('overTitle').textContent = title;
+  $('overText').textContent = text;
+  $('overOverlay').classList.remove('hidden');
+  $('btnRematch').classList.remove('hidden');
+  setStatus(title + '（' + text + '）');
+  render();
+}
+
+/* ローカル対戦の戦闘 */
+function resolveBattleLocal(atkOwner, from, to){
+  const atkPiece = board[from[0]][from[1]];
+  const defPiece = board[to[0]][to[1]];
+  const behind = defPiece.type === '軍旗' ? flagBehindType(board, to[0], to[1], defPiece.owner) : null;
+  const outcome = battle(atkPiece.type, defPiece.type, behind);
+  inputLocked = true;
+  showBattle(atkPiece, defPiece, outcome, atkOwner, () => {
+    applyBattleResult(atkOwner, from, to, atkPiece.type, defPiece.type, outcome);
+    inputLocked = false;
+    if (checkHQWin(atkOwner, to, atkPiece.type, outcome)){ gameOver(atkOwner, 'hq'); return; }
+    afterMoveDone(atkOwner, to, true);
+  });
+  render([[from[0], from[1]], [to[0], to[1]]]);
+}
+function showBattle(atkPiece, defPiece, outcome, atkOwner, done){
+  const viewer = mode === 'net' ? myIndex : viewAs;
+  const atkEl = $('battleAtk'), defEl = $('battleDef');
+  atkEl.textContent = atkPiece.type;
+  defEl.textContent = defPiece.type;
+  atkEl.style.background = atkOwner === viewer ? 'var(--mine-dark)' : 'var(--enemy-dark)';
+  defEl.style.background = atkOwner === viewer ? 'var(--enemy-dark)' : 'var(--mine-dark)';
+  $('battleResult').textContent =
+    outcome === 'atk' ? '攻撃側（' + atkPiece.type + '）の勝ち！' :
+    outcome === 'def' ? '守備側（' + defPiece.type + '）の勝ち！' : '引き分け（両方とも消えます）';
+  $('battleBanner').classList.remove('hidden');
+  setTimeout(() => { $('battleBanner').classList.add('hidden'); done(); }, 1500);
+}
+
+/* ---------- ネット対戦のメッセージ処理 ---------- */
+function onNetData(msg){
+  if (!msg || !msg.type) return;
+  if (msg.type === 'setup'){
+    // 相手の駒の位置だけを受け取り、中身の分からない駒として置く
+    if (moveNumber === 0 && phase !== 'over' && Array.isArray(msg.squares)){
+      for (const [r, c] of msg.squares){
+        if (!board[r][c]) board[r][c] = { owner: 1 - myIndex, type: null };
+      }
+      render();
+    }
+  }
+  else if (msg.type === 'ready'){
+    oppReady = true;
+    if (myReady && phase === 'place') startGame();
+    else if (phase === 'place') setStatus('相手は準備OKです。あなたの配置が終わったら「配置OK」を押してください。');
+  }
+  else if (msg.type === 'move'){
+    const key = msg.n + ':move';
+    if (processed.has(key)) return;
+    processed.add(key);
+    moveNumber = Math.max(moveNumber, msg.n);
+    const from = msg.from, to = msg.to;
+    const target = board[to[0]][to[1]];
+    if (target && target.owner === myIndex){
+      // 自分の駒が攻撃された：攻撃側に種類を聞いてから判定する
+      pendingRemoteBattle = { n: msg.n, from, to };
+      inputLocked = true;
+      setStatus('相手が戦闘を仕掛けてきました。判定しています…');
+      send({ type: 'reveal-req', n: msg.n });
+      render([[from[0], from[1]], [to[0], to[1]]]);
+    } else {
+      applyPlainMove(1 - myIndex, from, to);
+      // 相手が通常移動で自分の総司令部に入った場合は gameover メッセージが続く
+      afterMoveDone(1 - myIndex, to, false);
+    }
+  }
+  else if (msg.type === 'reveal-req'){
+    if (!pendingMyBattle || pendingMyBattle.n !== msg.n) return;
+    const p = board[pendingMyBattle.from[0]][pendingMyBattle.from[1]];
+    // 攻撃側はまだ自駒を from に保持している（適用は battle 受信時）
+    const atkType = p ? p.type : pendingMyBattle.atkType;
+    send({ type: 'reveal', n: msg.n, piece: atkType });
+  }
+  else if (msg.type === 'reveal'){
+    if (!pendingRemoteBattle || pendingRemoteBattle.n !== msg.n) return;
+    const { n, from, to } = pendingRemoteBattle;
+    pendingRemoteBattle = null;
+    const defPiece = board[to[0]][to[1]];
+    const behind = defPiece.type === '軍旗' ? flagBehindType(board, to[0], to[1], myIndex) : null;
+    const outcome = battle(msg.piece, defPiece.type, behind);
+    const battleMsg = { type: 'battle', n, atk: msg.piece, def: defPiece.type, defBehind: behind, outcome };
+    send(battleMsg);
+    applyRemoteBattleOutcome(1 - myIndex, from, to, battleMsg);
+  }
+  else if (msg.type === 'battle'){
+    const key = msg.n + ':battle';
+    if (processed.has(key)) return;
+    processed.add(key);
+    if (!pendingMyBattle || pendingMyBattle.n !== msg.n) return;
+    const { from, to } = pendingMyBattle;
+    pendingMyBattle = null;
+    // 自分（攻撃側）も同じ判定関数で検証する
+    const myPiece = board[from[0]][from[1]];
+    if (myPiece){
+      const verify = battle(myPiece.type, msg.def, msg.defBehind);
+      if (verify !== msg.outcome) setStatus('⚠️ 判定結果の検証が一致しませんでした。相手の判定で進めます。');
+    }
+    applyRemoteBattleOutcome(myIndex, from, to, msg);
+  }
+  else if (msg.type === 'gameover'){
+    const key = 'over:' + msg.winner + ':' + msg.reason;
+    if (processed.has(key)) return;
+    processed.add(key);
+    gameOver(msg.winner, msg.reason);
+  }
+  else if (msg.type === 'rematch'){
+    startPlacement();
+    setStatus('相手が再戦を申し込みました。配置からやり直します。');
+  }
+}
+function applyRemoteBattleOutcome(atkOwner, from, to, bm){
+  // 表示のため、駒オブジェクトを作る
+  const atkPiece = { owner: atkOwner, type: bm.atk };
+  const defPiece = { owner: 1 - atkOwner, type: bm.def };
+  inputLocked = true;
+  showBattle(atkPiece, defPiece, bm.outcome, atkOwner, () => {
+    applyBattleResult(atkOwner, from, to, bm.atk, bm.def, bm.outcome);
+    inputLocked = false;
+    if (checkHQWin(atkOwner, to, bm.atk, bm.outcome)){ gameOver(atkOwner, 'hq'); return; }
+    afterMoveDone(atkOwner, to, true);
+  });
+  render([[from[0], from[1]], [to[0], to[1]]]);
+}
+
+/* ---------- ボタン類 ---------- */
+$('btnNetMode').addEventListener('click', () => { mode = 'net'; $('netMenu').classList.remove('hidden'); });
+$('btnLocalMode').addEventListener('click', () => { mode = 'local'; startPlacement(); });
+$('btnHost').addEventListener('click', hostRoom);
+$('btnJoin').addEventListener('click', joinRoom);
+$('btnShuffle').addEventListener('click', () => {
+  if (phase !== 'place') return;
+  const me = mode === 'net' ? myIndex : localPlacer;
+  placeRandom(me); selected = null; render();
+});
+$('btnReady').addEventListener('click', onReady);
+$('btnReconnect').addEventListener('click', () => {
+  $('btnReconnect').classList.add('hidden');
+  try { if (peer) peer.destroy(); } catch(_){}
+  peer = null; conn = null;
+  if (netRole === 'host'){
+    // 同じコードで作り直す
+    if (typeof Peer === 'undefined') return;
+    peer = new Peer(peerIdFor(roomCode)); initPeerCommon();
+    peer.on('connection', (c) => { conn = c; setupConn(); });
+    setStatus('同じ部屋コード（' + roomCode + '）で待ち直しています。友達にも同じコードで入り直してもらってください。');
+  } else {
+    if (typeof Peer === 'undefined') return;
+    peer = new Peer(); initPeerCommon();
+    peer.on('open', () => { conn = peer.connect(peerIdFor(roomCode), { reliable: true }); setupConn(); });
+    setStatus('同じ部屋コード（' + roomCode + '）に入り直しています…');
+  }
+});
+function requestRematch(){
+  if (mode === 'net'){
+    send({ type: 'rematch' });
+    startPlacement();
+    setStatus('再戦します。配置からやり直してください。');
+  } else {
+    $('overOverlay').classList.add('hidden');
+    startPlacement();
+  }
+}
+$('btnRematch').addEventListener('click', requestRematch);
+$('btnOverRematch').addEventListener('click', () => { $('overOverlay').classList.add('hidden'); requestRematch(); });
+$('btnOverClose').addEventListener('click', () => { $('overOverlay').classList.add('hidden'); });
+</script>
+</body>
+</html>
+
